@@ -1,0 +1,34 @@
+viewer_branch,viewer_skills,target_branch,target_skills,target_company,is_match
+Computer Science,Java|Python|React,Computer Science,Java|Spring|AWS,Google,1
+Mechanical,CAD|SolidWorks,Computer Science,C++|Unreal Engine,Microsoft,0
+Computer Science,C++|SQL,Computer Science,C++|SQL|Azure,Microsoft,1
+Electronics,VHDL|Verilog,Electronics,VHDL|FPGA,Intel,1
+Civil,AutoCAD,Mechanical,CAD|FEA,L&T,0
+Computer Science,HTML|CSS,Computer Science,HTML|CSS|JavaScript,TCS,1
+Mechanical,Robotics,Electronics,Robotics|Python,Bosch,1
+Computer Science,AI|ML|PyTorch,Computer Science,AI|ML|TensorFlow,Nvidia,1
+Electronics,Signal Processing,Civil,Structural Analysis,L&T,0
+Computer Science,JavaScript|NodeJS,Computer Science,JavaScript|React|NodeJS,Amazon,1
+Mechanical,Thermodynamics,Mechanical,Fluid Dynamics,Bosch,1
+Civil,StaadPro,Civil,StaadPro|ETABS,L&T,1
+Electronics,Embedded C|RTOS,Computer Science,C++|Linux,Intel,1
+Computer Science,Cybersecurity,Computer Science,Networking|Security,Microsoft,1
+Mechanical,CAD,Electronics,VLSI,Intel,0
+Computer Science,Swift|iOS,Computer Science,Swift|iOS|UIKit,Apple,1
+Civil,Surveying,Computer Science,Web Development,Google,0
+Electronics,Analog Design,Electronics,Digital Design|Verilog,Qualcomm,1
+Computer Science,DevOps|Docker|K8s,Computer Science,DevOps|AWS|Ansible,Amazon,1
+Mechanical,Manufacturing,Civil,Project Management,L&T,0
+Computer Science,Go|Microservices,Computer Science,Java|Microservices|Spring,Netflix,1
+Electronics,Power Electronics,Mechanical,HVAC,Bosch,0
+Computer Science,UI/UX|Figma,Computer Science,UI/UX|Figma|Sketch,Adobe,1
+Civil,Transportation Engg,Civil,Geotechnical Engg,L&T,1
+Computer Science,PHP|Laravel,Computer Science,Python|Django,TCS,1
+Mechanical,3D Printing,Computer Science,Cloud Computing,Microsoft,0
+Electronics,Communication Systems,Electronics,5G|Wireless,Qualcomm,1
+Computer Science,QA|Selenium,Computer Science,QA|Automation|Java,Infosys,1
+Civil,Water Resources,Mechanical,Automotive,Bosch,0
+Computer Science,Data Science|Pandas,Computer Science,Data Science|Pandas|Scikit-learn,Netflix,1
+Electronics,Control Systems,Electronics,Robotics|Control Systems,Bosch,1
+Computer Science,Project Management|Agile,Computer Science,Product Management|Jira,Amazon,1
+Mechanical,FEA|Ansys,Mechanical,CFD|Fluent,L&T,1
