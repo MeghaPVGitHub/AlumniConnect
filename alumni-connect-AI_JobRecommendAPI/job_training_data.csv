@@ -1,0 +1,40 @@
+user_skills,user_branch,job_skills,is_match
+python|react|sql,Computer Science,react|nodejs|aws,1
+java|spring|aws,Computer Science,java|spring|aws,1
+python|pandas|ml,Computer Science,python|tensorflow|scikit-learn,1
+autocad|solidworks|catia,Mechanical,python|react|javascript,0
+marketing|seo|google_analytics,Business,marketing|social_media|seo,1
+c++|embedded|linux,Electronics,c++|qt|linux,1
+java|spring|hibernate,Computer Science,python|django|flask,0
+react|javascript|css,Computer Science,react|javascript|css,1
+python|django|postgres,Computer Science,python|django|docker,1
+matlab|simulink|robotics,Mechanical,matlab|robotics|autocad,1
+verilog|vhdl|fpga,Electronics,verilog|vhdl|xilinx,1
+java|android|kotlin,Computer Science,java|android|kotlin,1
+sales|crm|communication,Business,sales|hubspot|crm,1
+ansys|cfd|thermodynamics,Mechanical,ansys|cfd|fea,1
+digital_circuits|microcontrollers|arm,Electronics,microcontrollers|arm|rtos,1
+python|react|nodejs,Computer Science,java|spring|maven,0
+swift|ios|xcode,Computer Science,swift|ios|uikit,1
+supply_chain|logistics|excel,Business,supply_chain|sap|logistics,1
+cad|cam|manufacturing,Mechanical,cad|cam|solidworks,1
+pcb_design|eagle|altium,Electronics,pcb_design|eagle|orcad,1
+python|flask|mongodb,Computer Science,python|flask|mongodb,1
+javascript|html|css,Computer Science,c++|embedded|linux,0
+project_management|agile|scrum,Business,project_management|jira|agile,1
+kinematics|dynamics|machine_design,Mechanical,machine_design|solidworks,1
+signal_processing|dsp|communication_systems,Electronics,signal_processing|matlab,1
+python|data_analysis|jupyter,Computer Science,python|pandas|numpy,1
+financial_modeling|excel|valuation,Business,financial_modeling|excel|m&a,1
+autocad|revit|bim,Mechanical,autocad|revit|bim,1
+embedded_c|rtos|can_bus,Electronics,embedded_c|rtos|autosar,1
+python|react|sql,Computer Science,autocad|solidworks|catia,0
+marketing|content_creation|writing,Business,content_creation|copywriting,1
+java|spring|microservices,Computer Science,java|spring|microservices,1
+robotics|automation|plc,Mechanical,robotics|plc_programming,1
+analog_electronics|op-amps|sensors,Electronics,analog_electronics|spice,1
+python|fastapi|docker,Computer Science,python|fastapi|kubernetes,1
+ux|ui|figma,Computer Science,ux|figma|sketch,1
+human_resources|recruiting|ats,Business,recruiting|linkedin_recruiter,1
+thermal_engineering|heat_transfer|hvac,Mechanical,heat_transfer|hvac,1
+vlsi|systemverilog|cadence,Electronics,vlsi|systemverilog|synopsys,1
