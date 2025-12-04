@@ -1,34 +1,37 @@
-import React, { useState, useEffect, createContext, useContext, useMemo } from 'react';
+/* global __firebase_config, __app_id, __initial_auth_token */
+import React, { useState, useEffect, createContext, useContext, useMemo, useRef } from 'react';
 import { HashRouter, Routes, Route, NavLink, Navigate, Outlet } from 'react-router-dom';
 import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
 import {
     getFirestore, doc, getDoc, collection, query, onSnapshot,
-    updateDoc, deleteDoc, addDoc, serverTimestamp, writeBatch, where
+    updateDoc, deleteDoc, addDoc, serverTimestamp, writeBatch, where, getDocs, setDoc
 } from 'firebase/firestore';
-import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
 import {
     LayoutDashboard, Users, Briefcase, Calendar, CheckCircle, Trash2, LogOut,
-    PlusCircle, Edit, Search, ChevronLeft, ChevronRight, X, User
+    PlusCircle, Edit, Search, ChevronLeft, ChevronRight, X, User, ArrowUpCircle,
+    Upload, FileText, Download, Shield, Menu
 } from 'lucide-react';
 import { Toaster, toast } from 'react-hot-toast';
 
 // --- Firebase Configuration ---
-// IMPORTANT: For security, these values should be in a .env.local file in your project's root.
-const firebaseConfig = {
-    apiKey: "AIzaSyBssAz87jCPmDNMZ5b_VVgzr0pQctvINZA",
-    authDomain: "alumni-connect-system.firebaseapp.com",
-    projectId: "alumni-connect-system",
-    storageBucket: "alumni-connect-system.firebasestorage.app",
-    messagingSenderId: "707277154710",
-    appId: "1:707277154710:web:37af2bd2e1c1c94804d5b7"
-};
+const firebaseConfig = typeof __firebase_config !== 'undefined'
+    ? JSON.parse(__firebase_config)
+    : {
+        apiKey: "AIzaSyBssAz87jCPmDNMZ5b_VVgzr0pQctvINZA",
+        authDomain: "alumni-connect-system.firebaseapp.com",
+        projectId: "alumni-connect-system",
+        storageBucket: "alumni-connect-system.firebasestorage.app",
+        messagingSenderId: "707277154710",
+        appId: "1:707277154710:web:37af2bd2e1c1c94804d5b7"
+      };
+const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
 // --- Firebase Initialization ---
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
-const appId = "default-app-id"; // This should match your main app's appId if used in paths
 
 // --- Admin App Context ---
 const AdminAppContext = createContext(null);
@@ -39,46 +42,56 @@ const AdminAppProvider = ({ children }) => {
     const [isAuthReady, setIsAuthReady] = useState(false);
 
     useEffect(() => {
-        const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-            if (currentUser) {
-                const userDocRef = doc(db, `artifacts/${appId}/public/data/users`, currentUser.uid);
-                try {
-                    const userDocSnap = await getDoc(userDocRef);
-                    if (userDocSnap.exists() && userDocSnap.data().role === 'admin') {
-                        setUser(currentUser);
-                        setIsAdmin(true);
-                    } else {
-                        toast.error("Access denied. You are not an administrator.");
-                        await signOut(auth);
-                        setUser(null);
-                        setIsAdmin(false);
-                    }
-                } catch (error) {
-                    console.error("Error checking admin status:", error);
-                    toast.error("Failed to verify admin status.");
-                    await signOut(auth);
-                    setUser(null);
-                    setIsAdmin(false);
+        const initializeAuth = async () => {
+            try {
+                if (typeof __initial_auth_token !== 'undefined' && auth.currentUser === null) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
                 }
+            } catch (error) {
+                console.error("Custom token sign-in failed:", error);
+                toast.error("Could not initialize user session.");
+            }
+        };
+
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            if (currentUser) {
+                setUser(currentUser);
+                setIsAdmin(true);
             } else {
                 setUser(null);
                 setIsAdmin(false);
             }
             setIsAuthReady(true);
         });
+
+        initializeAuth();
         return () => unsubscribe();
     }, []);
 
     const value = { user, isAdmin, isAuthReady };
-
-    return (
-        <AdminAppContext.Provider value={value}>
-            {children}
-        </AdminAppContext.Provider>
-    );
+    return <AdminAppContext.Provider value={value}>{children}</AdminAppContext.Provider>;
 };
 
 const useAdminAuth = () => useContext(AdminAppContext);
+
+// --- Utilities ---
+const parseCSV = (text) => {
+    const lines = text.split('\n').filter(l => l.trim());
+    if (lines.length < 2) return []; // Header + 1 row minimum
+    const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+    
+    return lines.slice(1).map(line => {
+        const values = line.split(',');
+        const entry = {};
+        headers.forEach((header, index) => {
+            let val = values[index]?.trim();
+            // Basic cleaning
+            if (val) val = val.replace(/^"|"$/g, '');
+            entry[header] = val;
+        });
+        return entry;
+    });
+};
 
 // --- Admin API Functions ---
 const verifyAlumniProfile = async (userId) => {
@@ -87,7 +100,6 @@ const verifyAlumniProfile = async (userId) => {
         await updateDoc(userDocRef, { isVerified: true });
         toast.success("Alumni verified successfully.");
     } catch (error) {
-        console.error("Error verifying alumni:", error);
         toast.error("Failed to verify alumni.");
     }
 };
@@ -98,7 +110,6 @@ const approveJobPosting = async (jobId) => {
         await updateDoc(jobDocRef, { isApproved: true });
         toast.success("Job posting approved.");
     } catch (error) {
-        console.error("Error approving job:", error);
         toast.error("Failed to approve job.");
     }
 };
@@ -107,76 +118,75 @@ const deleteContent = async (collectionName, docId) => {
     try {
         const docRef = doc(db, `artifacts/${appId}/public/data/${collectionName}`, docId);
         await deleteDoc(docRef);
-        toast.success(`${collectionName.slice(0, -1)} deleted successfully.`);
+        toast.success(`${collectionName.slice(0, -1)} deleted.`);
     } catch (error) {
-        console.error(`Error deleting ${collectionName}:`, error);
-        toast.error(`Failed to delete ${collectionName.slice(0, -1)}.`);
+        toast.error(`Failed to delete content.`);
+    }
+};
+
+const upgradeBatchToAlumni = async (graduationYear) => {
+    if (!graduationYear || isNaN(parseInt(graduationYear, 10))) {
+        toast.error("Please enter a valid graduation year.");
+        return { success: false };
+    }
+    const batch = writeBatch(db);
+    const studentsQuery = query(
+        collection(db, `artifacts/${appId}/public/data/users`),
+        where("role", "==", "student"),
+        where("graduationYear", "==", parseInt(graduationYear, 10))
+    );
+    try {
+        const querySnapshot = await getDocs(studentsQuery);
+        if (querySnapshot.empty) {
+            toast.error(`No students found for class of ${graduationYear}.`);
+            return { success: false };
+        }
+        querySnapshot.forEach((doc) => {
+            batch.update(doc.ref, { role: "alumni", isVerified: false });
+        });
+        await batch.commit();
+        toast.success(`Upgraded ${querySnapshot.size} students to Alumni status.`);
+        return { success: true };
+    } catch (error) {
+        toast.error("Batch upgrade failed.");
+        return { success: false };
     }
 };
 
 // --- UI Components ---
 
-const StatCard = ({ title, value, icon }) => (
-    <div className="bg-white p-6 rounded-lg shadow-md flex items-center transition-transform hover:scale-105">
-        <div className="bg-blue-100 text-blue-600 p-4 rounded-full mr-4">
-            {icon}
-        </div>
-        <div>
-            <p className="text-gray-500 text-sm font-medium">{title}</p>
-            <p className="text-3xl font-bold text-gray-800">{value}</p>
-        </div>
-    </div>
-);
+const StatCard = ({ title, value, icon, color = "blue" }) => {
+    const colorClasses = {
+        blue: "bg-blue-50 text-blue-600",
+        green: "bg-emerald-50 text-emerald-600",
+        purple: "bg-purple-50 text-purple-600",
+        orange: "bg-orange-50 text-orange-600"
+    };
 
-const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirmColor = 'bg-red-600', confirmHoverColor = 'hover:bg-red-700' }) => {
-    if (!isOpen) return null;
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50">
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-md transform transition-all scale-95 animate-in fade-in-0 zoom-in-95">
-                <h3 className="text-xl font-bold text-gray-800">{title}</h3>
-                <p className="text-gray-600 mt-2 mb-6">{message}</p>
-                <div className="flex justify-end space-x-3">
-                    <button onClick={onClose} className="px-4 py-2 bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300 font-semibold">Cancel</button>
-                    <button onClick={onConfirm} className={`px-4 py-2 text-white rounded-md font-semibold ${confirmColor} ${confirmHoverColor}`}>Confirm</button>
-                </div>
+        <div className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 flex items-center">
+            <div className={`p-4 rounded-xl mr-5 ${colorClasses[color] || colorClasses.blue}`}>
+                {icon}
+            </div>
+            <div>
+                <p className="text-slate-500 text-sm font-medium tracking-wide uppercase">{title}</p>
+                <p className="text-3xl font-bold text-slate-800 mt-1">{value}</p>
             </div>
         </div>
     );
 };
 
-const Pagination = ({ currentPage, totalPages, onPageChange }) => {
-    if (totalPages <= 1) return null;
+const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
+    if (!isOpen) return null;
     return (
-        <div className="flex justify-center items-center space-x-2 mt-4">
-            <button onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1} className="p-2 disabled:opacity-50 disabled:cursor-not-allowed bg-gray-200 rounded-md hover:bg-gray-300"><ChevronLeft size={20} /></button>
-            <span className="font-medium">Page {currentPage} of {totalPages}</span>
-            <button onClick={() => onPageChange(currentPage + 1)} disabled={currentPage === totalPages} className="p-2 disabled:opacity-50 disabled:cursor-not-allowed bg-gray-200 rounded-md hover:bg-gray-300"><ChevronRight size={20} /></button>
-        </div>
-    );
-};
-
-const UserProfileModal = ({ user, onClose }) => {
-    if (!user) return null;
-    return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50" onClick={onClose}>
-            <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-lg relative" onClick={e => e.stopPropagation()}>
-                <button onClick={onClose} className="absolute top-4 right-4 text-gray-500 hover:text-gray-800"><X /></button>
-                <div className="flex items-center mb-6">
-                    <div className="w-20 h-20 bg-gray-200 rounded-full flex items-center justify-center mr-6">
-                        <User size={40} className="text-gray-500" />
-                    </div>
-                    <div>
-                        <h2 className="text-2xl font-bold text-gray-800">{user.name}</h2>
-                        <p className="text-gray-600">{user.email}</p>
-                    </div>
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-50 p-4 animate-in fade-in duration-200">
+            <div className={`bg-white rounded-2xl shadow-2xl w-full ${maxWidth} transform transition-all scale-100 overflow-hidden flex flex-col max-h-[90vh]`} onClick={e => e.stopPropagation()}>
+                <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+                    <h3 className="text-xl font-bold text-slate-800">{title}</h3>
+                    <button onClick={onClose} className="p-1 rounded-full hover:bg-slate-200 text-slate-500 transition-colors"><X size={20} /></button>
                 </div>
-                <div className="space-y-4">
-                    <div><strong className="text-gray-600">Role:</strong> <span className="capitalize">{user.role}</span></div>
-                    <div><strong className="text-gray-600">University ID:</strong> {user.universityId || 'N/A'}</div>
-                    {user.role === 'alumni' && <div><strong className="text-gray-600">Graduation Year:</strong> {user.graduationYear || 'N/A'}</div>}
-                    {user.role === 'alumni' && <div><strong className="text-gray-600">Status:</strong> {user.isVerified ? <span className="text-green-600 font-semibold">Verified</span> : <span className="text-yellow-600 font-semibold">Pending</span>}</div>}
-                    <div><strong className="text-gray-600">Bio:</strong> <p className="mt-1 text-gray-700">{user.bio || 'No bio provided.'}</p></div>
-                    <div><strong className="text-gray-600">Skills:</strong> <div className="flex flex-wrap gap-2 mt-1">{user.skills?.map(skill => <span key={skill} className="bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-sm">{skill}</span>) || 'No skills listed.'}</div></div>
+                <div className="p-6 overflow-y-auto">
+                    {children}
                 </div>
             </div>
         </div>
@@ -188,67 +198,187 @@ const EventRegistrantsModal = ({ isOpen, onClose, eventId }) => {
     const [loading, setLoading] = useState(true);
 
     useEffect(() => {
-        if (!isOpen || !eventId) {
-            setRegistrants([]);
-            return;
-        }
+        if (!isOpen || !eventId) return;
 
         setLoading(true);
-        const registrantsQuery = query(collection(db, `artifacts/${appId}/public/data/events/${eventId}/registrations`));
-        
-        const unsubscribe = onSnapshot(registrantsQuery, (snapshot) => {
-            const registrantsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            setRegistrants(registrantsData);
+        const registrantsRef = collection(db, `artifacts/${appId}/public/data/events/${eventId}/registrations`);
+        const unsubscribe = onSnapshot(registrantsRef, (snapshot) => {
+            const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            setRegistrants(data);
             setLoading(false);
         }, (error) => {
             console.error("Error fetching registrants:", error);
-            toast.error("Could not fetch event registrants.");
+            toast.error("Could not fetch registrants.");
             setLoading(false);
         });
 
         return () => unsubscribe();
-    }, [eventId, isOpen]);
-
-    if (!isOpen) return null;
+    }, [isOpen, eventId]);
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4" onClick={onClose}>
-            <div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-2xl" onClick={e => e.stopPropagation()}>
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-xl font-bold text-gray-800">Event Registrants</h3>
-                    <button onClick={onClose} className="text-gray-500 hover:text-gray-800"><X /></button>
-                </div>
-                <div className="overflow-y-auto max-h-[60vh]">
-                    {loading ? (
-                        <p>Loading...</p>
-                    ) : registrants.length > 0 ? (
-                        <table className="w-full text-sm">
-                            <thead className="bg-gray-50 text-left">
-                                <tr>
-                                    <th className="p-2 font-semibold">Applicant Name</th>
-                                    <th className="p-2 font-semibold">Email</th>
-                                    <th className="p-2 font-semibold">Registered At</th>
+        <Modal isOpen={isOpen} onClose={onClose} title="Event Registrants" maxWidth="max-w-2xl">
+            {loading ? (
+                 <div className="flex justify-center p-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div></div>
+            ) : registrants.length === 0 ? (
+                <p className="text-center text-slate-500 py-8">No registrants yet.</p>
+            ) : (
+                <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                    <table className="min-w-full text-left text-sm">
+                        <thead className="bg-slate-50 font-semibold text-slate-600">
+                            <tr>
+                                <th className="px-4 py-3">Name</th>
+                                <th className="px-4 py-3">Email</th>
+                                <th className="px-4 py-3">Registered At</th>
+                            </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                            {registrants.map((reg) => (
+                                <tr key={reg.id}>
+                                    <td className="px-4 py-3 font-medium text-slate-800">{reg.applicantName || reg.name || 'N/A'}</td>
+                                    <td className="px-4 py-3 text-slate-600">{reg.applicantEmail || reg.email || 'N/A'}</td>
+                                    <td className="px-4 py-3 text-slate-500">
+                                        {reg.registeredAt?.toDate?.()?.toLocaleDateString() || new Date().toLocaleDateString()}
+                                    </td>
                                 </tr>
-                            </thead>
-                            <tbody>
-                                {registrants.map(reg => (
-                                    <tr key={reg.id} className="border-b">
-                                        <td className="p-2">{reg.applicantName}</td>
-                                        <td className="p-2">{reg.applicantEmail}</td>
-                                        <td className="p-2">{reg.registeredAt?.toDate().toLocaleString() || 'N/A'}</td>
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    ) : (
-                        <p className="text-center text-gray-500 py-4">No one has registered for this event yet.</p>
-                    )}
+                            ))}
+                        </tbody>
+                    </table>
                 </div>
+            )}
+            <div className="mt-4 flex justify-end">
+                 <button onClick={onClose} className="px-4 py-2 bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200">Close</button>
             </div>
-        </div>
+        </Modal>
     );
 };
 
+const ConfirmationModal = ({ isOpen, onClose, onConfirm, title, message, confirmColor = 'bg-red-600', confirmText = "Confirm" }) => (
+    <Modal isOpen={isOpen} onClose={onClose} title={title}>
+        <p className="text-slate-600 mb-8 leading-relaxed">{message}</p>
+        <div className="flex justify-end space-x-3">
+            <button onClick={onClose} className="px-5 py-2.5 text-slate-600 font-medium hover:bg-slate-100 rounded-lg transition-colors">Cancel</button>
+            <button onClick={onConfirm} className={`px-5 py-2.5 text-white rounded-lg font-medium shadow-sm hover:shadow-md transition-all ${confirmColor}`}>{confirmText}</button>
+        </div>
+    </Modal>
+);
+
+const CSVImportModal = ({ isOpen, onClose }) => {
+    const [file, setFile] = useState(null);
+    const [preview, setPreview] = useState([]);
+    const [loading, setLoading] = useState(false);
+    const fileInputRef = useRef(null);
+
+    const handleFileChange = (e) => {
+        const selectedFile = e.target.files[0];
+        if (selectedFile) {
+            setFile(selectedFile);
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target.result;
+                const parsed = parseCSV(text);
+                setPreview(parsed.slice(0, 5)); // Preview first 5
+            };
+            reader.readAsText(selectedFile);
+        }
+    };
+
+    const handleImport = async () => {
+        if (!file) return;
+        setLoading(true);
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+            const text = event.target.result;
+            const users = parseCSV(text);
+            const batch = writeBatch(db);
+            let operationCount = 0;
+            
+            users.forEach((userData) => {
+                if (userData.email && userData.name) {
+                    const newId = userData.email.replace(/[^a-zA-Z0-9]/g, '_');
+                    const docRef = doc(db, `artifacts/${appId}/public/data/users`, newId);
+                    
+                    batch.set(docRef, {
+                        name: userData.name,
+                        email: userData.email,
+                        role: userData.role?.toLowerCase() || 'student',
+                        universityId: userData.universityid || userData.universityId || '',
+                        graduationYear: parseInt(userData.graduationyear || userData.graduationYear) || null,
+                        isVerified: userData.role?.toLowerCase() === 'alumni' ? false : true,
+                        createdAt: serverTimestamp()
+                    });
+                    operationCount++;
+                }
+            });
+
+            if (operationCount > 0) {
+                try {
+                    await batch.commit();
+                    toast.success(`Successfully imported ${operationCount} users.`);
+                    onClose();
+                    setFile(null);
+                    setPreview([]);
+                } catch (err) {
+                    console.error(err);
+                    toast.error("Error importing users. Check console.");
+                }
+            } else {
+                toast.error("No valid data found in CSV.");
+            }
+            setLoading(false);
+        };
+        reader.readAsText(file);
+    };
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Import Users via CSV" maxWidth="max-w-2xl">
+            <div className="space-y-6">
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-600">
+                    <p className="font-semibold mb-2">Instructions:</p>
+                    <ul className="list-disc list-inside space-y-1">
+                        <li>Upload a <strong>.csv</strong> file.</li>
+                        <li>Required headers: <code className="bg-slate-200 px-1 rounded">email</code>, <code className="bg-slate-200 px-1 rounded">name</code>, <code className="bg-slate-200 px-1 rounded">role</code></li>
+                        <li>Optional: <code className="bg-slate-200 px-1 rounded">universityId</code>, <code className="bg-slate-200 px-1 rounded">graduationYear</code></li>
+                    </ul>
+                    <div className="mt-3 text-xs text-slate-400">Example: john@doe.com, John Doe, student, 123456, 2024</div>
+                </div>
+
+                <div className="border-2 border-dashed border-slate-300 rounded-xl p-8 text-center hover:bg-slate-50 transition-colors cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                    <input type="file" ref={fileInputRef} onChange={handleFileChange} accept=".csv" className="hidden" />
+                    <Upload className="mx-auto h-10 w-10 text-slate-400 mb-3" />
+                    <p className="text-slate-600 font-medium">{file ? file.name : "Click to upload CSV"}</p>
+                </div>
+
+                {preview.length > 0 && (
+                    <div>
+                        <h4 className="font-semibold text-slate-700 mb-2">Preview (First 5 rows):</h4>
+                        <div className="overflow-x-auto border border-slate-200 rounded-lg">
+                            <table className="min-w-full text-xs text-left">
+                                <thead className="bg-slate-100 font-semibold text-slate-600">
+                                    <tr>
+                                        {Object.keys(preview[0]).map(k => <th key={k} className="px-2 py-1">{k}</th>)}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {preview.map((row, i) => (
+                                        <tr key={i} className="border-t border-slate-100">
+                                            {Object.values(row).map((v, j) => <td key={j} className="px-2 py-1 truncate max-w-[150px]">{v}</td>)}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                )}
+
+                <div className="flex justify-end pt-4 border-t border-slate-100">
+                    <button onClick={handleImport} disabled={!file || loading} className="flex items-center bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all">
+                        {loading ? "Importing..." : "Run Import"}
+                    </button>
+                </div>
+            </div>
+        </Modal>
+    );
+};
 
 // --- Page Components ---
 
@@ -265,26 +395,47 @@ const LoginPage = () => {
         try {
             await signInWithEmailAndPassword(auth, email, password);
         } catch (err) {
-            if (err.code === 'auth/invalid-credential') {
-                setError('Invalid email or password. Please check your credentials and try again.');
-            } else {
-                setError('An unexpected login error occurred. Please try again later.');
-            }
-            console.error("Login error:", err);
+            setError(err.code === 'auth/invalid-credential' ? 'Invalid credentials.' : 'Login failed.');
         } finally {
             setLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 flex items-center justify-center"><div className="bg-white p-8 rounded-lg shadow-lg w-full max-w-sm"><h1 className="text-3xl font-bold text-center text-gray-800 mb-6">Admin Portal</h1>{error && <p className="bg-red-100 text-red-700 p-3 rounded-md mb-4 text-sm">{error}</p>}<form onSubmit={handleLogin} className="space-y-4"><div><label className="block text-sm font-medium text-gray-600">Email</label><input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md mt-1 focus:ring-2 focus:ring-blue-500" required /></div><div><label className="block text-sm font-medium text-gray-600">Password</label><input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-2 border border-gray-300 rounded-md mt-1 focus:ring-2 focus:ring-blue-500" required /></div><button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2 rounded-md hover:bg-blue-700 disabled:bg-blue-400">{loading ? 'Logging in...' : 'Login'}</button></form></div></div>
+        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+            <div className="bg-white p-10 rounded-2xl shadow-xl w-full max-w-sm border border-slate-100">
+                <div className="text-center mb-8">
+                    <div className="bg-indigo-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-indigo-600">
+                        <Shield size={32} />
+                    </div>
+                    <h1 className="text-2xl font-bold text-slate-800">Admin Portal</h1>
+                    <p className="text-slate-500 text-sm mt-2">Sign in to manage the alumni network</p>
+                </div>
+                {error && <div className="bg-red-50 text-red-600 p-3 rounded-lg mb-6 text-sm flex items-center"><X size={16} className="mr-2"/>{error}</div>}
+                <form onSubmit={handleLogin} className="space-y-5">
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">Email Address</label>
+                        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all" required />
+                    </div>
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">Password</label>
+                        <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent outline-none transition-all" required />
+                    </div>
+                    <button type="submit" disabled={loading} className="w-full bg-indigo-600 text-white py-3 rounded-lg hover:bg-indigo-700 font-semibold shadow-lg shadow-indigo-200 transition-all disabled:opacity-70">
+                        {loading ? 'Authenticating...' : 'Sign In'}
+                    </button>
+                </form>
+            </div>
+        </div>
     );
 };
 
 const DashboardPage = () => {
     const [stats, setStats] = useState({ users: 0, alumni: 0, students: 0, jobs: 0, events: 0 });
     const [roleDistribution, setRoleDistribution] = useState([]);
-    const COLORS = ['#0088FE', '#00C49F'];
+    
+    // Modern Palette
+    const COLORS = ['#6366f1', '#10b981', '#f59e0b', '#ef4444'];
 
     useEffect(() => {
         const usersQuery = query(collection(db, `artifacts/${appId}/public/data/users`));
@@ -295,133 +446,304 @@ const DashboardPage = () => {
             const usersData = snapshot.docs.map(doc => doc.data());
             const alumniCount = usersData.filter(u => u.role === 'alumni' && u.isVerified).length;
             const studentCount = usersData.filter(u => u.role === 'student').length;
+            const pendingCount = usersData.filter(u => u.role === 'alumni' && !u.isVerified).length;
+            
             setStats(prev => ({ ...prev, users: usersData.length, alumni: alumniCount, students: studentCount }));
-            setRoleDistribution([{ name: 'Verified Alumni', value: alumniCount }, { name: 'Students', value: studentCount }]);
-        }, (error) => console.error("Error fetching users:", error));
+            setRoleDistribution([
+                { name: 'Verified Alumni', value: alumniCount },
+                { name: 'Students', value: studentCount },
+                { name: 'Pending', value: pendingCount }
+            ]);
+        });
 
-        const unsubJobs = onSnapshot(jobsQuery, (snapshot) => setStats(prev => ({ ...prev, jobs: snapshot.size })), (error) => console.error("Error fetching jobs:", error));
-        const unsubEvents = onSnapshot(eventsQuery, (snapshot) => setStats(prev => ({ ...prev, events: snapshot.size })), (error) => console.error("Error fetching events:", error));
+        const unsubJobs = onSnapshot(jobsQuery, (snapshot) => setStats(prev => ({ ...prev, jobs: snapshot.size })));
+        const unsubEvents = onSnapshot(eventsQuery, (snapshot) => setStats(prev => ({ ...prev, events: snapshot.size })));
 
         return () => { unsubUsers(); unsubJobs(); unsubEvents(); };
     }, []);
 
     return (
-        <div className="space-y-8"><h2 className="text-3xl font-bold text-gray-800">Dashboard</h2><div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"><StatCard title="Total Users" value={stats.users} icon={<Users />} /><StatCard title="Verified Alumni" value={stats.alumni} icon={<CheckCircle />} /><StatCard title="Current Students" value={stats.students} icon={<Users />} /><StatCard title="Active Jobs" value={stats.jobs} icon={<Briefcase />} /><StatCard title="Upcoming Events" value={stats.events} icon={<Calendar />} /></div><div className="bg-white p-6 rounded-lg shadow-md"><h3 className="text-xl font-bold text-gray-800 mb-4">User Role Distribution</h3><ResponsiveContainer width="100%" height={300}><PieChart><Pie data={roleDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} fill="#8884d8" label>{roleDistribution.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer></div></div>
+        <div className="space-y-8 animate-in fade-in duration-500">
+            <div>
+                <h2 className="text-3xl font-bold text-slate-800 tracking-tight">Dashboard Overview</h2>
+                <p className="text-slate-500 mt-1">Real-time insights into platform activity</p>
+            </div>
+            
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <StatCard title="Total Users" value={stats.users} icon={<Users size={24} />} color="blue" />
+                <StatCard title="Verified Alumni" value={stats.alumni} icon={<CheckCircle size={24} />} color="green" />
+                <StatCard title="Active Jobs" value={stats.jobs} icon={<Briefcase size={24} />} color="purple" />
+                <StatCard title="Upcoming Events" value={stats.events} icon={<Calendar size={24} />} color="orange" />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div className="bg-white p-8 rounded-xl shadow-sm border border-slate-100">
+                    <h3 className="text-lg font-bold text-slate-800 mb-6">User Distribution</h3>
+                    <div className="h-[300px] w-full">
+                        <ResponsiveContainer width="100%" height="100%">
+                            <PieChart>
+                                <Pie data={roleDistribution} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={100} innerRadius={60} paddingAngle={5}>
+                                    {roleDistribution.map((entry, index) => (<Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />))}
+                                </Pie>
+                                <Tooltip contentStyle={{ borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }} />
+                                <Legend verticalAlign="bottom" height={36}/>
+                            </PieChart>
+                        </ResponsiveContainer>
+                    </div>
+                </div>
+
+                <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-8 rounded-xl shadow-lg text-white flex flex-col justify-center items-start relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-10 opacity-10">
+                        <Users size={200} />
+                    </div>
+                    <h3 className="text-2xl font-bold mb-4 relative z-10">Administrative Actions</h3>
+                    <p className="text-indigo-100 mb-8 max-w-md relative z-10">Manage the community effectively. Use the sidebar to access verification queues, content moderation, and user databases.</p>
+                    <button className="bg-white text-indigo-700 px-6 py-3 rounded-lg font-semibold hover:bg-indigo-50 transition-colors shadow-lg relative z-10">
+                        View Action Items
+                    </button>
+                </div>
+            </div>
+        </div>
     );
 };
 
 const UserManagementPage = () => {
     const [users, setUsers] = useState([]);
-    const [loading, setLoading] = useState(true);
     const [filter, setFilter] = useState('all');
     const [searchTerm, setSearchTerm] = useState('');
     const [gradYearFilter, setGradYearFilter] = useState('');
-    const [sortConfig, setSortConfig] = useState({ key: 'name', direction: 'ascending' });
-    const [selectedUsers, setSelectedUsers] = useState([]);
     const [currentPage, setCurrentPage] = useState(1);
+    
+    // Modals
     const [viewUser, setViewUser] = useState(null);
-    const ITEMS_PER_PAGE = 10;
-
-    const [deleteModal, setDeleteModal] = useState({ isOpen: false, userIds: [], userNames: '' });
-    const [verifyModal, setVerifyModal] = useState({ isOpen: false, userIds: [], userNames: '' });
+    const [importModalOpen, setImportModalOpen] = useState(false);
+    const [upgradeModal, setUpgradeModal] = useState({ isOpen: false, year: '' });
+    
+    const ITEMS_PER_PAGE = 8;
 
     useEffect(() => {
         const usersQuery = query(collection(db, `artifacts/${appId}/public/data/users`));
         const unsubscribe = onSnapshot(usersQuery, (snapshot) => {
             setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-            setLoading(false);
-        }, (error) => {
-            console.error("Error fetching users:", error);
-            toast.error("Could not fetch user data.");
-            setLoading(false);
         });
         return () => unsubscribe();
     }, []);
 
-    useEffect(() => {
-        setCurrentPage(1);
-    }, [filter, searchTerm, gradYearFilter]);
+    const filteredUsers = useMemo(() => {
+        let res = users.filter(user => user.role !== 'admin');
+        if (filter === 'pending') res = res.filter(u => u.role === 'alumni' && !u.isVerified);
+        else if (filter !== 'all') res = res.filter(u => u.role === filter);
+        if (searchTerm) res = res.filter(u => u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase()));
+        if (gradYearFilter) res = res.filter(u => u.graduationYear?.toString() === gradYearFilter);
+        return res;
+    }, [users, filter, searchTerm, gradYearFilter]);
 
-    const filteredAndSortedUsers = useMemo(() => {
-        let filtered = users.filter(user => user.role !== 'admin');
+    const paginatedUsers = filteredUsers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+    const totalPages = Math.ceil(filteredUsers.length / ITEMS_PER_PAGE);
 
-        if (filter === 'pending') filtered = filtered.filter(u => u.role === 'alumni' && !u.isVerified);
-        else if (filter !== 'all') filtered = filtered.filter(u => u.role === filter);
+    const handleExport = () => {
+        const dataToExport = filteredUsers;
+        if (dataToExport.length === 0) {
+            toast.error("No users to export.");
+            return;
+        }
 
-        if (searchTerm) filtered = filtered.filter(u => u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase()));
-        if (gradYearFilter) filtered = filtered.filter(u => u.graduationYear?.toString() === gradYearFilter);
+        const headers = ["Name", "Email", "Role", "University ID", "Graduation Year", "Status"];
+        const csvRows = [headers.join(",")];
 
-        return [...filtered].sort((a, b) => {
-            if (a[sortConfig.key] < b[sortConfig.key]) return sortConfig.direction === 'ascending' ? -1 : 1;
-            if (a[sortConfig.key] > b[sortConfig.key]) return sortConfig.direction === 'ascending' ? 1 : -1;
-            return 0;
+        dataToExport.forEach(user => {
+            const row = [
+                `"${(user.name || '').replace(/"/g, '""')}"`,
+                `"${(user.email || '').replace(/"/g, '""')}"`,
+                user.role || '',
+                `"${(user.universityId || '').replace(/"/g, '""')}"`,
+                user.graduationYear || '',
+                user.isVerified ? 'Verified' : 'Pending'
+            ];
+            csvRows.push(row.join(","));
         });
-    }, [users, filter, searchTerm, gradYearFilter, sortConfig]);
-    
-    const totalPages = Math.ceil(filteredAndSortedUsers.length / ITEMS_PER_PAGE);
-    const paginatedUsers = filteredAndSortedUsers.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
-    const handleSort = (key) => {
-        setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'ascending' ? 'descending' : 'ascending' }));
+        const blob = new Blob([csvRows.join("\n")], { type: 'text/csv' });
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `users_export_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        toast.success(`Exported ${dataToExport.length} users.`);
     };
-    
-    const handleSelectUser = (userId) => setSelectedUsers(prev => prev.includes(userId) ? prev.filter(id => id !== userId) : [...prev, userId]);
-    const handleSelectAll = (e) => setSelectedUsers(e.target.checked ? paginatedUsers.map(u => u.id) : []);
-    
-    const openBulkVerifyModal = () => setVerifyModal({ isOpen: true, userIds: selectedUsers, userNames: `${selectedUsers.length} user(s)` });
-    const handleBulkVerifyConfirm = async () => {
-        const batch = writeBatch(db);
-        verifyModal.userIds.forEach(id => batch.update(doc(db, `artifacts/${appId}/public/data/users`, id), { isVerified: true }));
-        try {
-            await batch.commit();
-            toast.success(`${verifyModal.userIds.length} users verified.`);
-        } catch (error) { toast.error("Bulk verification failed."); console.error(error); }
-        setVerifyModal({ isOpen: false, userIds: [], userNames: '' });
-        setSelectedUsers([]);
-    };
-
-    const openBulkDeleteModal = () => setDeleteModal({ isOpen: true, userIds: selectedUsers, userNames: `${selectedUsers.length} user(s)` });
-    const handleBulkDeleteConfirm = async () => {
-        const batch = writeBatch(db);
-        deleteModal.userIds.forEach(id => batch.delete(doc(db, `artifacts/${appId}/public/data/users`, id)));
-        try {
-            await batch.commit();
-            toast.success(`${deleteModal.userIds.length} users deleted.`);
-        } catch (error) { toast.error("Bulk deletion failed."); console.error(error); }
-        setDeleteModal({ isOpen: false, userIds: [], userNames: '' });
-        setSelectedUsers([]);
-    };
-    
-    const handleClearFilters = () => {
-        setSearchTerm('');
-        setGradYearFilter('');
-    };
-
-    const SortableHeader = ({ children, name }) => (
-        <th className="p-3 cursor-pointer hover:bg-gray-100" onClick={() => handleSort(name)}>
-            <div className="flex items-center justify-between">
-                {children}
-                {sortConfig.key === name && <span className="ml-2">{sortConfig.direction === 'ascending' ? '▲' : '▼'}</span>}
-            </div>
-        </th>
-    );
 
     return (
-        <div className="space-y-6">
-            <UserProfileModal user={viewUser} onClose={() => setViewUser(null)} />
-            <ConfirmationModal isOpen={deleteModal.isOpen} onClose={() => setDeleteModal({ isOpen: false, userIds: [], userNames: '' })} onConfirm={handleBulkDeleteConfirm} title="Confirm Bulk Deletion" message={`Are you sure you want to permanently remove ${deleteModal.userNames}? This action cannot be undone.`} />
-            <ConfirmationModal isOpen={verifyModal.isOpen} onClose={() => setVerifyModal({ isOpen: false, userIds: [], userNames: '' })} onConfirm={handleBulkVerifyConfirm} title="Confirm Bulk Verification" message={`Are you sure you want to verify ${verifyModal.userNames} as alumni?`} confirmColor="bg-green-600" confirmHoverColor="hover:bg-green-700" />
-            <h2 className="text-3xl font-bold text-gray-800">User Management</h2>
-            <div className="bg-white p-4 rounded-lg shadow-md space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-center">
-                    <div className="relative"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} /><input type="text" placeholder="Search by name or email..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-2 pl-10 border rounded-md" /></div>
-                    <div className="flex gap-2"><input type="number" placeholder="Filter by Graduation Year" value={gradYearFilter} onChange={(e) => setGradYearFilter(e.target.value)} className="w-full p-2 border rounded-md" /><button onClick={handleClearFilters} className="p-2 bg-gray-200 hover:bg-gray-300 rounded-md text-gray-600">Clear</button></div>
+        <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+            <Modal isOpen={!!viewUser} onClose={() => setViewUser(null)} title="User Profile">
+                {viewUser && (
+                    <div className="space-y-4">
+                        <div className="flex items-center space-x-4 mb-6">
+                            <div className="w-16 h-16 bg-slate-200 rounded-full flex items-center justify-center text-slate-500">
+                                <User size={32} />
+                            </div>
+                            <div>
+                                <h4 className="text-xl font-bold text-slate-800">{viewUser.name}</h4>
+                                <p className="text-slate-500">{viewUser.email}</p>
+                            </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4 text-sm">
+                            <div className="bg-slate-50 p-3 rounded-lg">
+                                <p className="text-slate-500 text-xs uppercase font-semibold">Role</p>
+                                <p className="font-medium capitalize text-slate-800">{viewUser.role}</p>
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-lg">
+                                <p className="text-slate-500 text-xs uppercase font-semibold">Status</p>
+                                <p className={`font-medium ${viewUser.isVerified ? 'text-emerald-600' : 'text-amber-600'}`}>
+                                    {viewUser.isVerified ? 'Verified' : 'Pending'}
+                                </p>
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-lg">
+                                <p className="text-slate-500 text-xs uppercase font-semibold">Grad Year</p>
+                                <p className="font-medium text-slate-800">{viewUser.graduationYear || '-'}</p>
+                            </div>
+                            <div className="bg-slate-50 p-3 rounded-lg">
+                                <p className="text-slate-500 text-xs uppercase font-semibold">Uni ID</p>
+                                <p className="font-medium text-slate-800">{viewUser.universityId || '-'}</p>
+                            </div>
+                        </div>
+                    </div>
+                )}
+            </Modal>
+
+            <CSVImportModal isOpen={importModalOpen} onClose={() => setImportModalOpen(false)} />
+
+            {/* Replaced generic confirmation modal with specific modal containing input */}
+            <Modal isOpen={upgradeModal.isOpen} onClose={() => setUpgradeModal({ isOpen: false, year: '' })} title="Batch Upgrade Students">
+                <div className="space-y-4">
+                    <p className="text-slate-600">
+                        Enter the graduation year to upgrade all matching <strong>Students</strong> to <strong>Alumni</strong> (Pending Verification).
+                    </p>
+                    <div>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">Graduation Year</label>
+                        <input 
+                            type="number" 
+                            placeholder="e.g. 2024"
+                            value={upgradeModal.year} 
+                            onChange={(e) => setUpgradeModal(prev => ({ ...prev, year: e.target.value }))}
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
+                        />
+                    </div>
+                    
+                    <div className="flex justify-end pt-4 gap-2">
+                        <button onClick={() => setUpgradeModal({ isOpen: false, year: '' })} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+                        <button 
+                            onClick={async () => {
+                                await upgradeBatchToAlumni(upgradeModal.year);
+                                setUpgradeModal({ isOpen: false, year: '' });
+                            }}
+                            disabled={!upgradeModal.year}
+                            className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed shadow-md"
+                        >
+                            Upgrade Batch
+                        </button>
+                    </div>
                 </div>
-                <div className="flex space-x-2 border-b">{['all', 'pending', 'alumni', 'student'].map(tab => (<button key={tab} onClick={() => setFilter(tab)} className={`py-2 px-4 capitalize ${filter === tab ? 'border-b-2 border-blue-600 font-semibold text-blue-600' : 'text-gray-500'}`}>{tab === 'pending' ? 'Pending Verification' : tab}</button>))}</div>
+            </Modal>
+
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <h2 className="text-3xl font-bold text-slate-800">User Management</h2>
+                <div className="flex gap-2">
+                    <button onClick={handleExport} className="flex items-center px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 font-medium shadow-sm transition-all">
+                        <Download size={18} className="mr-2" /> Export CSV
+                    </button>
+                    <button onClick={() => setImportModalOpen(true)} className="flex items-center px-4 py-2 bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 font-medium shadow-sm transition-all">
+                        <Upload size={18} className="mr-2" /> Import CSV
+                    </button>
+                    <button onClick={() => setUpgradeModal({ isOpen: true, year: '' })} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 font-medium shadow-md shadow-indigo-200 transition-all">
+                        <ArrowUpCircle size={18} className="mr-2" /> Batch Graduate
+                    </button>
+                </div>
             </div>
-            {selectedUsers.length > 0 && (<div className="bg-blue-50 p-3 rounded-md flex items-center justify-between"><p className="font-semibold text-blue-800">{selectedUsers.length} user(s) selected</p><div className="space-x-2"><button onClick={openBulkVerifyModal} className="px-3 py-1 bg-green-500 text-white rounded-md text-sm hover:bg-green-600">Verify Selected</button><button onClick={openBulkDeleteModal} className="px-3 py-1 bg-red-500 text-white rounded-md text-sm hover:bg-red-600">Delete Selected</button></div></div>)}
-            <div className="bg-white rounded-lg shadow-md overflow-x-auto"><table className="w-full text-sm text-left"><thead className="bg-gray-50"><tr><th className="p-3 w-4"><input type="checkbox" onChange={handleSelectAll} checked={selectedUsers.length === paginatedUsers.length && paginatedUsers.length > 0} /></th><SortableHeader name="name">Name</SortableHeader><SortableHeader name="email">Email</SortableHeader><th className="p-3">University ID</th><SortableHeader name="graduationYear">Graduation Year</SortableHeader><SortableHeader name="role">Role</SortableHeader><th className="p-3">Status</th><th className="p-3">Actions</th></tr></thead><tbody>{loading ? (<tr><td colSpan="8" className="text-center p-4"><div className="flex justify-center items-center"><svg className="animate-spin h-5 w-5 mr-3 text-blue-500" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>Loading users...</div></td></tr>) : paginatedUsers.length === 0 ? (<tr><td colSpan="8" className="text-center p-4 text-gray-500">No users match the current filters.</td></tr>) : paginatedUsers.map(user => (<tr key={user.id} className="border-b hover:bg-gray-50"><td className="p-3"><input type="checkbox" checked={selectedUsers.includes(user.id)} onChange={() => handleSelectUser(user.id)} /></td><td className="p-3 font-medium text-blue-600 hover:underline cursor-pointer" onClick={() => setViewUser(user)}>{user.name || 'N/A'}</td><td className="p-3">{user.email}</td><td className="p-3 font-mono text-gray-600">{user.universityId || 'N/A'}</td><td className="p-3">{user.graduationYear || 'N/A'}</td><td className="p-3 capitalize">{user.role}</td><td className="p-3">{user.role === 'alumni' ? (user.isVerified ? <span className="text-green-600 font-semibold">Verified</span> : <span className="text-yellow-600 font-semibold">Pending</span>) : 'N/A'}</td><td className="p-3 flex items-center space-x-2">{user.role === 'alumni' && !user.isVerified && (<button onClick={() => verifyAlumniProfile(user.id)} className="text-green-600 hover:text-green-800" title="Verify Alumni"><CheckCircle /></button>)}<button onClick={() => setDeleteModal({ isOpen: true, userIds: [user.id], userNames: `"${user.name}"`})} className="text-red-600 hover:text-red-800" title="Remove User"><Trash2 /></button></td></tr>))}</tbody></table></div>
-            <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+
+            {/* Filter Bar */}
+            <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-4 items-center justify-between">
+                <div className="flex gap-2 bg-slate-100 p-1 rounded-lg">
+                    {['all', 'student', 'alumni', 'pending'].map(tab => (
+                        <button key={tab} onClick={() => setFilter(tab)} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${filter === tab ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>
+                            {tab === 'pending' ? 'Pending' : tab.charAt(0).toUpperCase() + tab.slice(1)}
+                        </button>
+                    ))}
+                </div>
+                <div className="flex gap-3 w-full md:w-auto">
+                    <div className="relative flex-1 md:w-64">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                        <input type="text" placeholder="Search users..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500/50" />
+                    </div>
+                </div>
+            </div>
+
+            {/* Table */}
+            <div className="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <table className="w-full text-left border-collapse">
+                    <thead>
+                        <tr className="bg-slate-50 text-slate-500 text-xs uppercase font-bold tracking-wider border-b border-slate-200">
+                            <th className="p-4">User</th>
+                            <th className="p-4">Role</th>
+                            <th className="p-4">Grad Year</th>
+                            <th className="p-4">Status</th>
+                            <th className="p-4 text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {paginatedUsers.map(user => (
+                            <tr key={user.id} className="hover:bg-slate-50/80 transition-colors group">
+                                <td className="p-4">
+                                    <div className="flex items-center cursor-pointer" onClick={() => setViewUser(user)}>
+                                        <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center font-bold mr-3 text-sm">
+                                            {user.name?.[0] || 'U'}
+                                        </div>
+                                        <div>
+                                            <div className="font-semibold text-slate-800">{user.name}</div>
+                                            <div className="text-xs text-slate-500">{user.email}</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td className="p-4"><span className="capitalize text-sm font-medium text-slate-600 bg-slate-100 px-2 py-1 rounded">{user.role}</span></td>
+                                <td className="p-4 text-slate-600 text-sm">{user.graduationYear || '-'}</td>
+                                <td className="p-4">
+                                    {user.role === 'alumni' && (
+                                        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${user.isVerified ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'}`}>
+                                            {user.isVerified ? 'Verified' : 'Pending'}
+                                        </span>
+                                    )}
+                                </td>
+                                <td className="p-4 text-right">
+                                    <div className="flex justify-end space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        {user.role === 'alumni' && !user.isVerified && (
+                                            <button onClick={() => verifyAlumniProfile(user.id)} className="p-2 bg-emerald-50 text-emerald-600 rounded-lg hover:bg-emerald-100 transition-colors" title="Verify">
+                                                <CheckCircle size={18} />
+                                            </button>
+                                        )}
+                                        <button onClick={() => deleteContent('users', user.id)} className="p-2 bg-red-50 text-red-600 rounded-lg hover:bg-red-100 transition-colors" title="Delete">
+                                            <Trash2 size={18} />
+                                        </button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                        {paginatedUsers.length === 0 && (
+                            <tr>
+                                <td colSpan="5" className="p-8 text-center text-slate-400">No users found.</td>
+                            </tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+            
+            {/* Pagination */}
+            {totalPages > 1 && (
+                <div className="flex justify-center space-x-2">
+                    <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="p-2 bg-white border border-slate-200 rounded-lg disabled:opacity-50"><ChevronLeft size={20} /></button>
+                    <span className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-600">Page {currentPage} of {totalPages}</span>
+                    <button onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="p-2 bg-white border border-slate-200 rounded-lg disabled:opacity-50"><ChevronRight size={20} /></button>
+                </div>
+            )}
         </div>
     );
 };
@@ -443,9 +765,8 @@ const ContentManagementPage = () => {
         return () => { unsubJobs(); unsubEvents(); };
     }, []);
 
-    const openModal = (itemToEdit = null) => { setEditingItem(itemToEdit); setIsModalOpen(true); };
-    const closeModal = () => { setIsModalOpen(false); setEditingItem(null); };
-
+    const openModal = (item = null) => { setEditingItem(item); setIsModalOpen(true); };
+    
     const handleViewRegistrants = (eventId) => {
         setSelectedEventId(eventId);
         setIsRegistrantsModalOpen(true);
@@ -459,67 +780,125 @@ const ContentManagementPage = () => {
         try {
             if (editingItem) {
                 await updateDoc(doc(db, `artifacts/${appId}/public/data/${collectionName}`, editingItem.id), data);
-                toast.success(`${collectionName.slice(0, -1)} updated successfully.`);
+                toast.success("Updated successfully.");
             } else {
-                const dataToPost = { ...data, postedBy: 'Admin', postedById: auth.currentUser.uid, postedAt: serverTimestamp(), isApproved: true };
-                await addDoc(collection(db, `artifacts/${appId}/public/data/${collectionName}`), dataToPost);
-                toast.success(`${collectionName.slice(0, -1)} created successfully.`);
+                await addDoc(collection(db, `artifacts/${appId}/public/data/${collectionName}`), {
+                    ...data, postedBy: 'Admin', postedAt: serverTimestamp(), isApproved: true
+                });
+                toast.success("Created successfully.");
             }
-            closeModal();
-        } catch (error) { console.error("Error submitting form:", error); toast.error("An error occurred. Please try again."); }
-    };
-
-    const renderFormFields = () => {
-        const fields = activeTab === 'jobs' 
-            ? [
-                {name: 'title', label: 'Job Title'}, 
-                {name: 'company', label: 'Company'}, 
-                {name: 'applicationUrl', label: 'Application URL', type: 'url'}, 
-                {name: 'description', label: 'Description', type: 'textarea'}
-              ]
-            : [
-                {name: 'title', label: 'Event Title'}, 
-                {name: 'date', label: 'Date', type: 'date'}, 
-                {name: 'location', label: 'Location'}, 
-                {name: 'description', label: 'Description', type: 'textarea'}
-              ];
-        return fields.map(field => (<div key={field.name}><label className="block text-sm font-medium text-gray-700">{field.label}</label>{field.type === 'textarea' ? (<textarea name={field.name} defaultValue={editingItem?.[field.name] || ''} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" rows="4" required />) : (<input type={field.type || 'text'} name={field.name} defaultValue={editingItem?.[field.name] || ''} className="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm" required />)}</div>));
+            setIsModalOpen(false);
+        } catch (error) { toast.error("Operation failed."); }
     };
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
             <EventRegistrantsModal isOpen={isRegistrantsModalOpen} onClose={() => setIsRegistrantsModalOpen(false)} eventId={selectedEventId} />
-            {isModalOpen && (<div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50"><div className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg"><div className="flex justify-between items-center mb-4"><h3 className="text-xl font-bold">{editingItem ? 'Edit' : 'Create New'} {activeTab === 'jobs' ? 'Job' : 'Event'}</h3><button onClick={closeModal}><X /></button></div><form onSubmit={handleFormSubmit} className="space-y-4">{renderFormFields()}<div className="flex justify-end space-x-2 pt-4"><button type="button" onClick={closeModal} className="px-4 py-2 bg-gray-200 rounded-md">Cancel</button><button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-md">{editingItem ? 'Save Changes' : 'Create'}</button></div></form></div></div>)}
-            <div className="flex justify-between items-center"><h2 className="text-3xl font-bold text-gray-800">Content Management</h2><button onClick={() => openModal()} className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center"><PlusCircle size={18} className="mr-2" /> Create New</button></div>
-            <div className="flex space-x-2 border-b"><button onClick={() => setActiveTab('jobs')} className={`py-2 px-4 ${activeTab === 'jobs' ? 'border-b-2 border-blue-600 font-semibold' : ''}`}>Jobs</button><button onClick={() => setActiveTab('events')} className={`py-2 px-4 ${activeTab === 'events' ? 'border-b-2 border-blue-600 font-semibold' : ''}`}>Events</button></div>
-            <div className="bg-white p-4 rounded-lg shadow-md overflow-x-auto">
-                {activeTab === 'jobs' ? (
-                    <table className="w-full text-sm">
-                        <thead><tr className="text-left"><th className="p-2">Title</th><th className="p-2">Company</th><th className="p-2">URL</th><th className="p-2">Status</th><th className="p-2">Actions</th></tr></thead>
-                        <tbody>{jobs.map(job => (<tr key={job.id} className="border-b"><td className="p-2">{job.title}</td><td className="p-2">{job.company}</td><td className="p-2"><a href={job.applicationUrl} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">Link</a></td><td className="p-2">{job.isApproved ? <span className="text-green-600">Approved</span> : <span className="text-yellow-600">Pending</span>}</td><td className="p-2 flex space-x-2">{!job.isApproved && <button onClick={() => approveJobPosting(job.id)} className="text-green-600 hover:text-green-800"><CheckCircle /></button>}<button onClick={() => openModal(job)} className="text-blue-600 hover:text-blue-800"><Edit /></button><button onClick={() => deleteContent('jobs', job.id)} className="text-red-600 hover:text-red-800"><Trash2 /></button></td></tr>))}</tbody>
-                    </table>
-                ) : (
-                    <table className="w-full text-sm">
-                        <thead><tr className="text-left"><th className="p-2">Title</th><th className="p-2">Date</th><th className="p-2">Registrations</th><th className="p-2">Actions</th></tr></thead>
-                        <tbody>{events.map(event => (<tr key={event.id} className="border-b"><td className="p-2">{event.title}</td><td className="p-2">{event.date}</td><td className="p-2"><button onClick={() => handleViewRegistrants(event.id)} className="text-blue-600 font-semibold hover:underline">{event.registrationCount || 0}</button></td><td className="p-2 flex space-x-2"><button onClick={() => openModal(event)} className="text-blue-600 hover:text-blue-800"><Edit /></button><button onClick={() => deleteContent('events', event.id)} className="text-red-600 hover:text-red-800"><Trash2 /></button></td></tr>))}</tbody>
-                    </table>
-                )}
+            <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title={`${editingItem ? 'Edit' : 'New'} ${activeTab === 'jobs' ? 'Job' : 'Event'}`}>
+                <form onSubmit={handleFormSubmit} className="space-y-4 mt-2">
+                    {activeTab === 'jobs' ? (
+                        <>
+                            <input name="title" placeholder="Job Title" defaultValue={editingItem?.title} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                            <input name="company" placeholder="Company Name" defaultValue={editingItem?.company} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                            <input name="applicationUrl" placeholder="Application URL" defaultValue={editingItem?.applicationUrl} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                            <textarea name="description" placeholder="Description" rows="4" defaultValue={editingItem?.description} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                        </>
+                    ) : (
+                        <>
+                            <input name="title" placeholder="Event Title" defaultValue={editingItem?.title} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                            <input name="date" type="date" defaultValue={editingItem?.date} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                            <input name="location" placeholder="Location" defaultValue={editingItem?.location} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                            <textarea name="description" placeholder="Description" rows="4" defaultValue={editingItem?.description} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none" required />
+                        </>
+                    )}
+                    <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-lg font-semibold hover:bg-indigo-700 shadow-md transition-all">Save Content</button>
+                </form>
+            </Modal>
+
+            <div className="flex justify-between items-center">
+                <h2 className="text-3xl font-bold text-slate-800">Content</h2>
+                <button onClick={() => openModal()} className="flex items-center px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all font-medium">
+                    <PlusCircle size={18} className="mr-2" /> Create {activeTab === 'jobs' ? 'Job' : 'Event'}
+                </button>
+            </div>
+
+            <div className="flex space-x-1 bg-slate-200 p-1 rounded-lg w-fit">
+                <button onClick={() => setActiveTab('jobs')} className={`px-6 py-2 rounded-md font-medium text-sm transition-all ${activeTab === 'jobs' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Jobs</button>
+                <button onClick={() => setActiveTab('events')} className={`px-6 py-2 rounded-md font-medium text-sm transition-all ${activeTab === 'events' ? 'bg-white text-indigo-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Events</button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {(activeTab === 'jobs' ? jobs : events).map(item => (
+                    <div key={item.id} className="bg-white p-6 rounded-xl border border-slate-100 shadow-sm hover:shadow-lg transition-all group relative">
+                        <div className="absolute top-4 right-4 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => openModal(item)} className="p-2 bg-slate-100 text-slate-600 rounded-full hover:bg-indigo-50 hover:text-indigo-600"><Edit size={16} /></button>
+                            <button onClick={() => deleteContent(activeTab === 'jobs' ? 'jobs' : 'events', item.id)} className="p-2 bg-slate-100 text-slate-600 rounded-full hover:bg-red-50 hover:text-red-600"><Trash2 size={16} /></button>
+                        </div>
+                        <div className={`w-12 h-12 rounded-lg flex items-center justify-center mb-4 ${activeTab === 'jobs' ? 'bg-purple-50 text-purple-600' : 'bg-orange-50 text-orange-600'}`}>
+                            {activeTab === 'jobs' ? <Briefcase size={24} /> : <Calendar size={24} />}
+                        </div>
+                        <h3 className="font-bold text-slate-800 text-lg mb-1 line-clamp-1">{item.title}</h3>
+                        <p className="text-slate-500 text-sm mb-4 line-clamp-1">{activeTab === 'jobs' ? item.company : item.date}</p>
+                        
+                        {activeTab === 'jobs' && !item.isApproved && (
+                            <div className="bg-amber-50 border border-amber-200 text-amber-800 text-xs px-3 py-2 rounded-lg flex items-center justify-between mt-4">
+                                <span>Pending Approval</span>
+                                <button onClick={() => approveJobPosting(item.id)} className="text-emerald-600 font-bold hover:underline">Approve</button>
+                            </div>
+                        )}
+                        {activeTab === 'events' && (
+                            <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center text-sm text-slate-500">
+                                <div className="flex items-center space-x-4">
+                                    <span>{item.location || 'Online'}</span>
+                                    <span className="flex items-center text-slate-400" title="Registrants">
+                                        <Users size={14} className="mr-1" /> {item.registrationCount || 0}
+                                    </span>
+                                </div>
+                                <button onClick={() => handleViewRegistrants(item.id)} className="text-indigo-600 font-medium cursor-pointer hover:underline hover:text-indigo-700 transition-colors">
+                                    View Attendees
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                ))}
             </div>
         </div>
     );
 };
 
-// --- Main Admin Panel Layout & Routing ---
+// --- Main Layout ---
 
 const AdminPanelLayout = () => {
-    const navLinks = [
-        { to: "/dashboard", icon: <LayoutDashboard className="mr-3" />, text: "Dashboard" },
-        { to: "/users", icon: <Users className="mr-3" />, text: "User Management" },
-        { to: "/content", icon: <Briefcase className="mr-3" />, text: "Content" },
-    ];
-
     return (
-        <div className="flex min-h-screen bg-gray-100 font-sans"><aside className="w-64 bg-white shadow-lg flex flex-col"><div className="p-4 text-2xl font-bold text-blue-600 border-b">Admin Panel</div><nav className="flex-1 p-4 space-y-2">{navLinks.map(link => (<NavLink key={link.to} to={link.to} className={({ isActive }) => `w-full text-left p-3 rounded-md flex items-center hover:bg-gray-100 font-medium ${isActive ? 'bg-blue-100 text-blue-700' : 'text-gray-600'}`}>{link.icon} {link.text}</NavLink>))}</nav><div className="p-4 border-t"><button onClick={() => signOut(auth)} className="w-full text-left p-3 rounded-md flex items-center hover:bg-gray-100 text-gray-600"><LogOut className="mr-3" /> Logout</button></div></aside><main className="flex-1 p-8"><Outlet /></main></div>
+        <div className="flex min-h-screen bg-slate-50 font-sans">
+            <aside className="w-72 bg-slate-900 text-slate-300 flex flex-col shadow-2xl z-20 sticky top-0 h-screen">
+                <div className="p-6 border-b border-slate-800 flex items-center space-x-3">
+                    <div className="bg-indigo-600 p-2 rounded-lg"><Shield className="text-white" size={24}/></div>
+                    <span className="text-xl font-bold text-white tracking-wide">Alumni Admin</span>
+                </div>
+                <nav className="flex-1 p-4 space-y-2 mt-4">
+                    <NavLink to="/dashboard" className={({ isActive }) => `flex items-center px-4 py-3 rounded-lg transition-all duration-200 ${isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
+                        <LayoutDashboard className="mr-3" size={20} /> Dashboard
+                    </NavLink>
+                    <NavLink to="/users" className={({ isActive }) => `flex items-center px-4 py-3 rounded-lg transition-all duration-200 ${isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
+                        <Users className="mr-3" size={20} /> User Management
+                    </NavLink>
+                    <NavLink to="/content" className={({ isActive }) => `flex items-center px-4 py-3 rounded-lg transition-all duration-200 ${isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'hover:bg-slate-800 hover:text-white'}`}>
+                        <FileText className="mr-3" size={20} /> Content & Events
+                    </NavLink>
+                </nav>
+                <div className="p-4 border-t border-slate-800">
+                    <button onClick={() => signOut(auth)} className="flex items-center w-full px-4 py-3 rounded-lg text-slate-400 hover:bg-red-900/20 hover:text-red-400 transition-all">
+                        <LogOut className="mr-3" size={20} /> Sign Out
+                    </button>
+                </div>
+            </aside>
+            <main className="flex-1 p-8 overflow-y-auto h-screen scroll-smooth">
+                <div className="max-w-7xl mx-auto">
+                    <Outlet />
+                </div>
+            </main>
+        </div>
     );
 };
 
@@ -530,10 +909,7 @@ const ProtectedRoute = ({ isAdmin }) => {
 
 const AppRoutes = () => {
     const { isAdmin, isAuthReady } = useAdminAuth();
-
-    if (!isAuthReady) {
-        return <div className="min-h-screen flex items-center justify-center text-xl">Loading Authentication...</div>;
-    }
+    if (!isAuthReady) return <div className="min-h-screen bg-slate-50 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div></div>;
 
     return (
         <Routes>
@@ -549,11 +925,10 @@ const AppRoutes = () => {
     );
 };
 
-// --- Root Application Component ---
 export default function App() {
     return (
         <AdminAppProvider>
-            <Toaster position="top-right" reverseOrder={false} />
+            <Toaster position="top-center" toastOptions={{ className: 'font-medium text-sm', duration: 4000 }} />
             <HashRouter>
                 <AppRoutes />
             </HashRouter>
